@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 RESOURCES = ROOT / "resources"
 BACKUP_ROOT = Path(os.environ["LOCALAPPDATA"]) / "Claude-zh-CN-official-backup" / "json-only"
-CONFIG_PATH = Path(os.environ["APPDATA"]) / "Claude-3p" / "config.json"
+CONFIG_PATH = Path(os.environ["LOCALAPPDATA"]) / "Claude-3p" / "config.json"
 
 
 def find_claude_package() -> Path | None:
@@ -48,6 +48,18 @@ def backup_file(path: Path, app_resources: Path) -> None:
         copy2_best_effort(path, dst, context="backup file")
 
 
+
+def _take_ownership(path: Path) -> bool:
+    """Take ownership and grant write access via takeown + icacls."""
+    import subprocess
+    try:
+        subprocess.run(["takeown", "/f", str(path), "/a"], capture_output=True, timeout=30)
+        subprocess.run(["icacls", str(path), "/grant", "Administrators:F"], capture_output=True, timeout=30)
+        return True
+    except Exception:
+        return False
+
+
 def copy2_best_effort(src: Path, dst: Path, *, context: str) -> bool:
     """Copy a file and retry once after clearing the destination readonly bit."""
     try:
@@ -55,10 +67,9 @@ def copy2_best_effort(src: Path, dst: Path, *, context: str) -> bool:
         return True
     except PermissionError:
         if dst.exists():
-            try:
-                dst.chmod(dst.stat().st_mode | stat.S_IWRITE)
-            except OSError:
-                pass
+            _take_ownership(dst)
+        else:
+            _take_ownership(dst.parent)
         try:
             shutil.copy2(src, dst)
             return True
@@ -76,10 +87,10 @@ def write_text_best_effort(path: Path, text: str, *, context: str) -> bool:
         path.write_text(text, encoding="utf-8")
         return True
     except PermissionError:
-        try:
-            path.chmod(path.stat().st_mode | stat.S_IWRITE)
-        except OSError:
-            pass
+        if path.exists():
+            _take_ownership(path)
+        else:
+            _take_ownership(path.parent)
         try:
             path.write_text(text, encoding="utf-8")
             return True

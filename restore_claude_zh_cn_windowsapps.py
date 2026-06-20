@@ -50,17 +50,28 @@ def restore_from(backup_root: Path, app_resources: Path) -> int:
     return restored
 
 
+
+def _take_ownership(path: Path) -> bool:
+    """Take ownership and grant write access via takeown + icacls."""
+    import subprocess
+    try:
+        subprocess.run(["takeown", "/f", str(path), "/a"], capture_output=True, timeout=30)
+        subprocess.run(["icacls", str(path), "/grant", "Administrators:F"], capture_output=True, timeout=30)
+        return True
+    except Exception:
+        return False
+
+
 def copy2_best_effort(src: Path, dst: Path, *, context: str) -> bool:
-    """Copy a file and retry once after clearing the destination readonly bit."""
+    """Copy a file and retry after taking ownership of TrustedInstaller-protected files."""
     try:
         shutil.copy2(src, dst)
         return True
     except PermissionError:
         if dst.exists():
-            try:
-                dst.chmod(dst.stat().st_mode | stat.S_IWRITE)
-            except OSError:
-                pass
+            _take_ownership(dst)
+        else:
+            _take_ownership(dst.parent)
         try:
             shutil.copy2(src, dst)
             return True
@@ -78,10 +89,10 @@ def write_text_best_effort(path: Path, text: str, *, context: str) -> bool:
         path.write_text(text, encoding="utf-8")
         return True
     except PermissionError:
-        try:
-            path.chmod(path.stat().st_mode | stat.S_IWRITE)
-        except OSError:
-            pass
+        if path.exists():
+            _take_ownership(path)
+        else:
+            _take_ownership(path.parent)
         try:
             path.write_text(text, encoding="utf-8")
             return True
